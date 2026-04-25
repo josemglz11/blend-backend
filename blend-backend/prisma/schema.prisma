@@ -1,0 +1,260 @@
+// prisma/schema.prisma
+// BLEND platform data model
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── CATALOG ──────────────────────────────────────────────────────────────────
+
+model ProteinBase {
+  id          String   @id @default(uuid())
+  slug        String   @unique  // "whey_isolate" | "vegan_blend" | "casein"
+  name        String
+  description String
+  isDairy     Boolean  @default(true)
+  isVegan     Boolean  @default(false)
+  calPer25g   Int
+  carbsPer25g Float
+  fatPer25g   Float
+  basePrice   Decimal  @db.Decimal(8,2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  blendSpecs  BlendSpec[]
+}
+
+model Flavor {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  name      String
+  hexColor  String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  blendSpecs BlendSpec[]
+}
+
+model AddIn {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  name        String
+  description String
+  dosageNote  String
+  pricePerBag Decimal  @db.Decimal(8,2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  blendSpecAddIns BlendSpecAddIn[]
+}
+
+// ─── BLEND SPEC ───────────────────────────────────────────────────────────────
+// The canonical object. Everything hangs off this.
+
+model BlendSpec {
+  id            String   @id @default(uuid())
+  version       Int      @default(1)
+  ruleSetVersion String  @default("1.0.0")
+
+  baseId        String
+  base          ProteinBase @relation(fields:[baseId], references:[id])
+
+  flavorId      String
+  flavor        Flavor      @relation(fields:[flavorId], references:[id])
+
+  proteinGrams  Int          // 20 | 25 | 30
+  servingsPerBag Int         @default(30)
+
+  // Computed fields, stored for audit and quick display
+  caloriesPerServing Int
+  carbsPerServing    Float
+  fatPerServing      Float
+  priceMonthly       Decimal  @db.Decimal(8,2)
+
+  // Quiz answers snapshot, for replay and support
+  quizAnswers   Json?
+  quizVersion   String?  @default("1.0.0")
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  addIns        BlendSpecAddIn[]
+  subscriptions Subscription[]
+  orders        Order[]
+}
+
+model BlendSpecAddIn {
+  blendSpecId String
+  blendSpec   BlendSpec @relation(fields:[blendSpecId], references:[id])
+  addInId     String
+  addIn       AddIn     @relation(fields:[addInId], references:[id])
+
+  @@id([blendSpecId, addInId])
+}
+
+// ─── CUSTOMERS ────────────────────────────────────────────────────────────────
+
+model Customer {
+  id              String   @id @default(uuid())
+  email           String   @unique
+  firstName       String
+  lastName        String
+  stripeCustomerId String? @unique
+
+  // Shipping defaults
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  postalCode      String?
+  country         String?  @default("MX")
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscriptions   Subscription[]
+  orders          Order[]
+}
+
+// ─── SUBSCRIPTION STATE MACHINE ───────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  ACTIVE
+  ACTIVE_PENDING_MODIFICATION
+  PAUSED
+  SKIP_NEXT
+  PAYMENT_FAILED
+  CANCEL_PENDING
+  CANCELED
+}
+
+enum BillingInterval {
+  MONTHLY
+  QUARTERLY
+}
+
+model Subscription {
+  id                    String              @id @default(uuid())
+  customerId            String
+  customer              Customer            @relation(fields:[customerId], references:[id])
+
+  // Current canonical blend
+  blendSpecId           String
+  blendSpec             BlendSpec           @relation(fields:[blendSpecId], references:[id])
+
+  // Pending modification, separate from canonical blend
+  pendingBlendSpecId    String?
+  // (resolved at next ship)
+
+  status                SubscriptionStatus  @default(ACTIVE)
+  billingInterval       BillingInterval     @default(MONTHLY)
+
+  // Stripe
+  stripeSubscriptionId  String?             @unique
+  stripePaymentMethodId String?
+
+  // Scheduling
+  nextShipDate          DateTime
+  nextBillingDate       DateTime
+  resumeDate            DateTime?           // set when paused with a date
+
+  // Cancellation
+  cancelAtPeriodEnd     Boolean             @default(false)
+  cancelRequestedAt     DateTime?
+
+  // Payment failure tracking
+  paymentFailedAt       DateTime?
+  paymentRetryCount     Int                 @default(0)
+  lastPaymentError      String?
+
+  // Tenure (never resets on pause)
+  startedAt             DateTime            @default(now())
+  totalCyclesCompleted  Int                 @default(0)
+
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  events                SubscriptionEvent[]
+  orders                Order[]
+}
+
+// Every state transition emits an event. Full audit trail.
+model SubscriptionEvent {
+  id             String   @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields:[subscriptionId], references:[id])
+
+  fromStatus     SubscriptionStatus?
+  toStatus       SubscriptionStatus
+  reason         String?
+  isUserDriven   Boolean  @default(true)
+  metadata       Json?
+
+  createdAt      DateTime @default(now())
+}
+
+// ─── ORDERS ───────────────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  SENT_TO_COPACKER
+  IN_PRODUCTION
+  SHIPPED
+  DELIVERED
+  REFUNDED
+  FAILED
+}
+
+model Order {
+  id              String      @id @default(uuid())
+  orderNumber     String      @unique @default(uuid())
+
+  customerId      String
+  customer        Customer    @relation(fields:[customerId], references:[id])
+
+  subscriptionId  String?
+  subscription    Subscription? @relation(fields:[subscriptionId], references:[id])
+
+  blendSpecId     String
+  blendSpec       BlendSpec   @relation(fields:[blendSpecId], references:[id])
+
+  status          OrderStatus @default(PENDING_PAYMENT)
+
+  // Pricing snapshot at time of order
+  basePrice       Decimal     @db.Decimal(8,2)
+  addInsPrice     Decimal     @db.Decimal(8,2)
+  totalPrice      Decimal     @db.Decimal(8,2)
+  currency        String      @default("USD")
+
+  // Stripe
+  stripePaymentIntentId String?
+
+  // Shipping
+  trackingNumber  String?
+  carrierCode     String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+
+  // Copacker
+  copackerOrderId    String?
+  copackerSentAt     DateTime?
+  copackerPickPackDoc Json?    // full fulfillment instructions snapshot
+
+  // Shipping address snapshot
+  shipToName      String?
+  shipToLine1     String?
+  shipToLine2     String?
+  shipToCity      String?
+  shipToState     String?
+  shipToPostal    String?
+  shipToCountry   String?
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
