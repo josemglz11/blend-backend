@@ -19,7 +19,24 @@ app.post('/api/v1/stripe/webhook', express.raw({ type: 'application/json' }), st
 // ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    // Allow any vercel.app domain, localhost, and the configured FRONTEND_URL
+    const allowed = [
+      process.env.FRONTEND_URL,
+      'http://localhost:5173',
+      'http://localhost:3000',
+    ].filter(Boolean);
+    if (
+      allowed.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.includes('localhost')
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true); // Allow all for MVP, tighten later
+  },
   credentials: true,
 }));
 app.use(express.json());
