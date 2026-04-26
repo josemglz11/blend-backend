@@ -53,11 +53,12 @@ async function main() {
   await prisma.flavor.createMany({
     skipDuplicates: true,
     data: [
-      { slug: 'chocolate',   name: 'Chocolate',   hexColor: '#3d1f0f' },
-      { slug: 'vanilla',     name: 'Vanilla',      hexColor: '#c9a96e' },
-      { slug: 'strawberry',  name: 'Strawberry',   hexColor: '#c0392b' },
-      { slug: 'coffee',      name: 'Coffee',       hexColor: '#4a2c0a' },
-      { slug: 'unflavored',  name: 'Unflavored',   hexColor: '#888880' },
+      { slug: 'chocolate',    name: 'Chocolate',      hexColor: '#3d1f0f' },
+      { slug: 'vanilla',      name: 'Vanilla',        hexColor: '#c9a96e' },
+      { slug: 'strawberry',   name: 'Strawberry',     hexColor: '#c0392b' },
+      { slug: 'coffee',       name: 'Coffee',         hexColor: '#4a2c0a' },
+      { slug: 'cookies_cream',name: 'Cookies & Cream',hexColor: '#2a2a2a' },
+      { slug: 'unflavored',   name: 'Unflavored',     hexColor: '#888880' },
     ],
   });
 
