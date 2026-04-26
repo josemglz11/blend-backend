@@ -11,8 +11,8 @@ const prisma = new PrismaClient();
 // ─── VALIDATION SCHEMA ────────────────────────────────────────────────────────
 
 export const BlendSpecInputSchema = z.object({
-  baseSlug:     z.enum(['whey_isolate', 'vegan_blend', 'casein']),
-  flavorSlug:   z.enum(['chocolate', 'vanilla', 'strawberry', 'coffee', 'unflavored']),
+  baseSlug:     z.enum(['whey_isolate', 'vegan_blend', 'casein', 'whey']).transform(v => v === 'whey' ? 'whey_isolate' : v),
+  flavorSlug:   z.enum(['chocolate', 'vanilla', 'strawberry', 'coffee', 'unflavored', 'cookies_cream']),
   proteinGrams: z.union([z.literal(20), z.literal(25), z.literal(30)]),
   addInSlugs:   z.array(z.string()).max(5).default([]),
   quizAnswers:  z.record(z.unknown()).optional(),
