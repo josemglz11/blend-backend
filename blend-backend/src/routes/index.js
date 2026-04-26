@@ -161,6 +161,84 @@ router.post('/checkout/intent', requireAuth, async (req, res) => {
   } catch (e) { err(res, e.message); }
 });
 
+// POST /api/v1/checkout/quick-intent
+// Guest checkout: creates customer, blend spec, and payment intent in one call.
+// No auth required. Used by the frontend for the MVP flow.
+router.post('/checkout/quick-intent', async (req, res) => {
+  try {
+    const schema = z.object({
+      firstName:       z.string().min(1),
+      lastName:        z.string().min(1),
+      email:           z.string().email(),
+      addressLine1:    z.string().optional(),
+      city:            z.string().optional(),
+      postalCode:      z.string().optional(),
+      country:         z.string().default('US'),
+      baseSlug:        z.string(),
+      flavorSlug:      z.string(),
+      proteinGrams:    z.number(),
+      addInSlugs:      z.array(z.string()).default([]),
+      quizAnswers:     z.record(z.unknown()).optional(),
+      billingInterval: z.enum(['MONTHLY', 'QUARTERLY', 'ONETIME']).default('MONTHLY'),
+      amount:          z.number(),
+    });
+
+    const data = validate(schema, req.body);
+
+    // 1. Upsert customer
+    let customer = await prisma.customer.findUnique({ where: { email: data.email } });
+    if (!customer) {
+      const stripeCustomer = await stripe.customers.create({
+        email: data.email,
+        name:  `${data.firstName} ${data.lastName}`,
+      });
+      customer = await prisma.customer.create({
+        data: {
+          email:           data.email,
+          firstName:       data.firstName,
+          lastName:        data.lastName,
+          stripeCustomerId: stripeCustomer.id,
+          addressLine1:    data.addressLine1 ?? null,
+          city:            data.city ?? null,
+          postalCode:      data.postalCode ?? null,
+          country:         data.country,
+        },
+      });
+    }
+
+    // 2. Create blend spec
+    const spec = await BlendSpecService.create({
+      baseSlug:     data.baseSlug,
+      flavorSlug:   data.flavorSlug,
+      proteinGrams: data.proteinGrams,
+      addInSlugs:   data.addInSlugs,
+      quizAnswers:  data.quizAnswers,
+    });
+
+    // 3. Create Stripe payment intent
+    const intent = await stripe.paymentIntents.create({
+      amount:   data.amount,
+      currency: 'usd',
+      customer: customer.stripeCustomerId,
+      metadata: {
+        customer_id:      customer.id,
+        blend_spec_id:    spec.id,
+        billing_interval: data.billingInterval,
+      },
+    });
+
+    ok(res, {
+      clientSecret: intent.client_secret,
+      customerId:   customer.id,
+      blendSpecId:  spec.id,
+      amount:       data.amount,
+    });
+  } catch (e) {
+    console.error('[QuickIntent]', e.message);
+    err(res, e.message);
+  }
+});
+
 // ─── SUBSCRIPTIONS ────────────────────────────────────────────────────────────
 
 // GET /api/v1/subscriptions
